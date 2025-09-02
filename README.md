@@ -8,6 +8,9 @@
 
 ---
 
+[Еще больше полезного](https://t.me/gulyaev_it)
+[гайды на livecoding, system design и кучу всего - на YouTube](https://www.youtube.com/@gulyaev_it)
+[Сократить путь до оффера](https://cutt.ly/prL6d9Y6)
 
 <a id="task-1"></a>
 ## Задача 1. Параллельные запросы + отмена при любой ошибке + состояние через sealed interface
