@@ -205,6 +205,39 @@ fun main() {
 
 ---
 
+<a id="task-5"></a>
+## Задача 5. Работа с Flow и презентационным слоем
+
+**Стартовый код** Сделайте рефакторинг кода, а также допишите реализацию вьюмодели для получения списка моделей по запросу. Пользователь вводит текст запроса, приложение отправляет запрос и отдает для экрана `observable screen state`. 
+
+*(См. решение 5 в конце.)*
+
+```kotlin
+interface Interactor {
+
+    suspend fun getModels(query: String): List<Model>
+}
+
+class ScreenViewModel(private val interactor: Interactor): ViewModel() {
+
+    val list: MutableStateFLow<List<Model>> = MutableStateFlow()
+    
+    fun onTextChanged(value: String) {
+        //todo realization
+    }
+
+}
+```
+
+
+### Решение
+
+[Перейти к решению 5](#solution-5).
+
+---
+
+
+
 
 ## Критерии оценки
 
@@ -558,4 +591,93 @@ fun main() {
 }
 
 ```
+**Далее:** [к задаче 5 →](#task-5)
+
+---
+
+<a id="solution-5"></a>
+### Решение 5 (к задаче 5)
+
+Пояснения по ключевым решениям
+
+- `queryFlow: MutableStateFlow<String>` — единый источник правды для текста поиска.
+- «Мгновенная» ветка `.map { Typing }` даёт UI немедленный отклик на ввод (можно, например, показать подсказки/хинты).
+- Основная ветка с `debounce(300)` + `distinctUntilChanged()` снижает нагрузку и не дёргает сеть слишком часто.
+- `flatMapLatest` обеспечивает отмену предыдущего запроса при новом вводе.
+- Пустой запрос даёт `Idle`, что удобно для стартового экрана.
+- Ошибки попадают в `Error(query, throwable)`; UI может показать баннер/кнопку «Повторить».
+- `stateIn(viewModelScope, WhileSubscribed(5s), Idle)` делает поток горячим и экономит ресурсы, когда экран не в фокусе.
+- `ioDispatcherProvider` внедрён для простого тестирования (можно подменить на `UnconfinedTestDispatcher`).
+
+```kotlin
+data class Model(val id: String, val title: String)
+
+interface Interactor {
+    suspend fun getModels(query: String): List<Model>
+}
+
+// State экрана
+sealed interface ScreenState {
+    data object Idle : ScreenState
+    data class Typing(val query: String) : ScreenState
+    data class Loading(val query: String) : ScreenState
+    data class Success(val query: String, val items: List<Model>) : ScreenState
+    data class Empty(val query: String) : ScreenState
+    data class Error(val query: String, val throwable: Throwable) : ScreenState
+}
+
+class ScreenViewModel(
+    private val interactor: Interactor,
+    private val ioDispatcherProvider: suspend () -> kotlin.coroutines.CoroutineContext = { kotlinx.coroutines.Dispatchers.IO }
+    private val debounceMs: Long = 300L,
+) : ViewModel() {
+
+    private val queryFlow = MutableStateFlow("")
+
+    val state: StateFlow<ScreenState> =
+        queryFlow
+            .distinctUntilChanged()
+            .transformLatest { q ->
+                // немедленный отклик UI
+                emit(ScreenState.Typing(q))
+
+                if (q.isBlank()) {
+                    emit(ScreenState.Idle)
+                    return@transformLatest
+                }
+
+                // дебаунс «search-as-you-type»
+                delay(debounceMs)
+
+                emit(ScreenState.Loading(q))
+                try {
+					val context = ioDispatcherProvider()
+                    val list = withContext(context) {
+                        interactor.getModels(q.trim())
+                    }
+                    if (list.isEmpty()) {
+                        emit(ScreenState.Empty(q))
+                    } else {
+                        emit(ScreenState.Success(q, list))
+                    }
+                } catch (t: Throwable) {
+                    emit(ScreenState.Error(q, t))
+                }
+            }
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(5_000),
+                initialValue = ScreenState.Idle
+            )
+
+    fun onTextChanged(value: String) {
+        queryFlow.value = value
+    }
+}
+
+
+```
+---
+
+
 
